@@ -404,7 +404,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--prompt",
         type=str,
-        default="white plate",
+        default="Plastic Reel Conncted With Tape",
         help='Default text prompt when request omits "prompt"',
     )
     parser.add_argument(
