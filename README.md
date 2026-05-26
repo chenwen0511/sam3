@@ -160,6 +160,32 @@ response = video_predictor.handle_request(
 output = response["outputs"]
 ```
 
+## REST API
+
+You can expose the single-image inference flow in `scripts/infer.py` as an HTTP
+service via `run_server.py`.
+
+Start the server in the `sam3` Conda environment:
+
+```bash
+conda run -n sam3 python run_server.py --host 127.0.0.1 --port 18002
+```
+
+Example request to `POST /infer`:
+
+```bash
+curl -X POST http://127.0.0.1:18002/infer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_path": "/home/ubuntu/stephen/01-code/sam3/test/rgb.png",
+    "prompt": "Plastic Reel Conncted With Tape",
+    "threshold": 0.41,
+    "mask_threshold": 0.5,
+    "save_vis": true,
+    "output_dir": "/home/ubuntu/stephen/01-code/sam3/outputs"
+  }'
+```
+
 ## Examples
 
 The `examples` directory contains notebooks demonstrating how to use SAM3 with
