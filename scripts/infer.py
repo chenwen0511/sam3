@@ -228,6 +228,7 @@ def run_sam3_segmentation(
     fill_hole_area: int = 16,
     sprinkle_area: int = 16,
     postprocess: bool = True,
+
 ) -> Path:
     """Run SAM3 text-prompt segmentation; writes all instances above threshold."""
     t0 = time.perf_counter()
@@ -248,7 +249,15 @@ def run_sam3_segmentation(
 
     t_pred0 = time.perf_counter()
     with autocast_ctx:
+        import numpy as np
+        print("-------pointing----------")
         state = processor.set_image(image)
+        #W, H = image.size
+        #xywh = [312, 143, 38, 211]
+        #norm_xywh = [xywh[0] / W, xywh[1] / H, xywh[2] / W, xywh[3] / H]
+        #box = norm_cxcy + [0.01, 0.01]
+        #output = processor.add_geometric_prompt(state=state, box=norm_xywh, label=True)
+        cxcy = [348, 236]
         output = processor.set_text_prompt(state=state, prompt=prompt)
     t_pred1 = time.perf_counter()
     print(f"[sam3_seg_backend] predict elapsed_ms={(t_pred1 - t_pred0) * 1000:.3f}")
@@ -278,9 +287,13 @@ def run_sam3_segmentation(
             mask = (logit > mask_threshold).cpu().numpy().astype(bool)
         if not mask.any():
             continue
-        raw_masks.append(mask)
-        raw_scores.append(score)
-        raw_boxes.append(_bbox_from_mask(mask))
+        print(f"mask shape: {mask.shape}")
+        if mask[cxcy[1], cxcy[0]]:
+            print(f"pointed mask[{i}]....")
+            raw_masks.append(mask)
+            raw_scores.append(score)
+            raw_boxes.append(_bbox_from_mask(mask))
+            break
 
     n_before = len(raw_masks)
     if postprocess and n_before > 1:

@@ -1,0 +1,330 @@
+# SAM3 Inference HTTP API
+
+`run_server.py` 将 `scripts/infer.py` 的单图文本提示分割能力封装为 REST 服务。
+
+- 默认地址：`http://<host>:18002`
+- 请求格式：`application/json`
+- 响应格式：`application/json`
+
+## 启动服务
+
+```bash
+conda run -n sam3 python run_server.py --host 0.0.0.0 --port 18002
+```
+
+常用启动参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `--host` | `0.0.0.0` | 监听地址 |
+| `--port` | `18002` | 监听端口 |
+| `--checkpoint` | `$SAM3_CHECKPOINT_DIR/sam3.pt` | 默认模型权重路径 |
+| `--prompt` | `Plastic Reel Conncted With Tape` | 请求未传 `prompt` 时的默认值 |
+| `--threshold` | `0.221` | 默认检测分数阈值 |
+| `--mask-threshold` | `0.50` | 默认 mask 二值化阈值 |
+| `--iom-threshold` | `0.30` | 默认 IoM 重叠过滤阈值 |
+| `--fill-hole-area` | `16` | 默认填洞面积 |
+| `--sprinkle-area` | `16` | 默认去噪点面积 |
+| `--save-vis` | `false` | 是否默认生成可视化图 |
+| `--no-postprocess` | `false` | 是否默认关闭后处理 |
+| `--max-request-mb` | `64` | 最大 JSON 请求体大小（MB） |
+
+环境变量：
+
+- `SAM3_CHECKPOINT_DIR`：checkpoint 目录，默认 `/home/ubuntu/stephen/02-weight/sam3`
+
+---
+
+## 接口列表
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `GET` | `/` | 服务信息与可用接口 |
+| `GET` | `/health` | 健康检查 |
+| `POST` | `/infer` | 单图文本提示分割推理 |
+| `OPTIONS` | `*` | CORS 预检 |
+
+---
+
+## GET /
+
+返回服务基本信息。
+
+**响应示例**
+
+```json
+{
+  "ok": true,
+  "service": "sam3-infer",
+  "endpoints": {
+    "health": "GET /health",
+    "infer": "POST /infer"
+  }
+}
+```
+
+---
+
+## GET /health
+
+用于探活，不触发模型推理。
+
+**响应示例**
+
+```json
+{
+  "ok": true,
+  "service": "sam3-infer",
+  "script_version": "4",
+  "infer_module_loaded": true
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ok` | bool | 服务是否正常 |
+| `service` | string | 服务名称 |
+| `script_version` | string | `scripts/infer.py` 版本；首次调用 `/infer` 前为 `"unloaded"` |
+| `infer_module_loaded` | bool | 推理模块是否已加载 |
+
+---
+
+## POST /infer
+
+对单张 RGB 图像执行 SAM3 文本提示分割，返回所有高于阈值的实例。
+
+### 请求头
+
+```
+Content-Type: application/json
+```
+
+### 请求体
+
+#### 图像输入（二选一，必填其一）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `image_path` | string | **服务端本机**可访问的绝对路径。仅适用于客户端与服务端在同一台机器，或共享存储的场景 |
+| `image_base64` | string | 图像的 Base64 编码。支持纯 Base64 或 Data URL（如 `data:image/png;base64,...`）。**跨机器调用时必须使用此字段** |
+
+> **注意**：`image_path` 和 `image_base64` 必须且只能提供一个。跨机器传客户端本地路径会导致 `400 image not found`。
+
+#### 推理参数（均可选）
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `prompt` | string | 服务端 `--prompt` | 文本提示词 |
+| `threshold` | float | 服务端 `--threshold` | 检测分数阈值 |
+| `mask_threshold` | float | 服务端 `--mask-threshold` | mask 二值化阈值 |
+| `checkpoint` | string | 服务端 `--checkpoint` | 模型权重路径 |
+| `iom_threshold` | float | 服务端 `--iom-threshold` | IoM 重叠过滤阈值 |
+| `fill_hole_area` | int | 服务端 `--fill-hole-area` | 连通域填洞最大面积，`0` 表示关闭 |
+| `sprinkle_area` | int | 服务端 `--sprinkle-area` | 连通域去噪点最大面积，`0` 表示关闭 |
+| `postprocess` | bool | 服务端默认（开启） | 是否启用 mask 后处理与重叠过滤 |
+| `save_vis` | bool | 服务端 `--save-vis` | 是否生成可视化图 `vis_ism.png` |
+| `return_vis_base64` | bool | `false` | 是否在响应中返回可视化图的 Base64；为 `true` 时会自动启用 `save_vis` |
+
+#### 输出参数（可选）
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `output_dir` | string | **服务端本机**可写目录。若提供，结果会落盘到 `{output_dir}/sam6d_results/`；若不提供，使用临时目录，响应中路径字段为 `null` |
+
+### 成功响应
+
+HTTP `200`
+
+```json
+{
+  "ok": true,
+  "prompt": "handle",
+  "num_detections": 1,
+  "detections": [
+    {
+      "scene_id": 0,
+      "image_id": 0,
+      "category_id": 1,
+      "bbox": [120, 80, 200, 150],
+      "score": 0.699,
+      "time": 0.0,
+      "segmentation": {
+        "counts": "...",
+        "size": [480, 640]
+      }
+    }
+  ],
+  "elapsed_ms": 1333.129,
+  "checkpoint": "/home/ubuntu/stephen/02-weight/sam3/sam3.pt",
+  "script_version": "4",
+  "output_json_path": "/path/on/server/sam6d_results/detection_ism.json",
+  "visualization_path": "/path/on/server/sam6d_results/vis_ism.png",
+  "visualization_base64": "..."
+}
+```
+
+字段说明：
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ok` | bool | 是否成功 |
+| `prompt` | string | 实际使用的提示词 |
+| `num_detections` | int | 检测实例数量 |
+| `detections` | array | 检测结果列表，格式与 `scripts/infer.py` 输出的 `detection_ism.json` 一致 |
+| `elapsed_ms` | float | 推理耗时（毫秒） |
+| `checkpoint` | string | 使用的模型权重路径 |
+| `script_version` | string | 推理脚本版本 |
+| `output_json_path` | string \| null | 落盘 JSON 路径；未指定 `output_dir` 时为 `null` |
+| `visualization_path` | string \| null | 落盘可视化图路径；未生成或未落盘时为 `null` |
+| `visualization_base64` | string | 仅当 `return_vis_base64=true` 时返回 |
+
+#### detections 单条记录
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `scene_id` | int | 固定为 `0` |
+| `image_id` | int | 固定为 `0` |
+| `category_id` | int | 固定为 `1` |
+| `bbox` | `[x, y, w, h]` | 边界框，像素坐标，左上角 + 宽高 |
+| `score` | float | 检测置信度 |
+| `time` | float | 固定为 `0.0` |
+| `segmentation` | object | COCO RLE 格式 mask，`size` 为 `[height, width]` |
+
+### 错误响应
+
+所有错误响应格式：
+
+```json
+{
+  "ok": false,
+  "error": "错误描述"
+}
+```
+
+| HTTP 状态码 | 常见原因 |
+|-------------|----------|
+| `400` | 参数错误、JSON 无效、图像路径不存在、`image_path`/`image_base64` 未正确提供、请求体过大 |
+| `404` | 未知路由 |
+| `422` | 推理完成但无有效检测，或请求了可视化但未生成 |
+| `500` | 服务内部异常 |
+
+常见错误示例：
+
+```json
+{"ok": false, "error": "image not found: /home/nvidia/.../rgb.png"}
+```
+
+```json
+{"ok": false, "error": "provide exactly one of image_path or image_base64"}
+```
+
+```json
+{"ok": false, "error": "SAM3 returned no valid detections for prompt='handle' (threshold=0.41, mask_threshold=0.5)"}
+```
+
+---
+
+## 调用示例
+
+### 1. 本机路径（客户端与服务端同一台机器）
+
+```bash
+curl -X POST http://127.0.0.1:18002/infer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_path": "/home/ubuntu/stephen/01-code/sam3/test/rgb.png",
+    "prompt": "Plastic Reel Conncted With Tape",
+    "threshold": 0.41,
+    "mask_threshold": 0.5,
+    "save_vis": true,
+    "output_dir": "/home/ubuntu/stephen/01-code/sam3/outputs"
+  }'
+```
+
+### 2. 跨机器传图（推荐）
+
+客户端读取本地图片，以 Base64 发送；**不要传客户端本地 `image_path`**。
+
+```bash
+# 客户端先生成 base64（示例）
+IMG_B64=$(base64 -w0 /home/nvidia/stephen/HandleGrasping/data/pot/rgb.png)
+
+curl -X POST http://192.168.100.147:18002/infer \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"image_base64\": \"${IMG_B64}\",
+    \"prompt\": \"handle\",
+    \"threshold\": 0.41,
+    \"mask_threshold\": 0.5,
+    \"return_vis_base64\": true
+  }"
+```
+
+Python 客户端示例：
+
+```python
+import base64
+from pathlib import Path
+
+import requests
+
+rgb_path = Path("/home/nvidia/stephen/HandleGrasping/data/pot/rgb.png")
+img_b64 = base64.b64encode(rgb_path.read_bytes()).decode("ascii")
+
+payload = {
+    "image_base64": img_b64,
+    "prompt": "handle",
+    "threshold": 0.41,
+    "mask_threshold": 0.5,
+    "return_vis_base64": True,
+}
+
+resp = requests.post(
+    "http://192.168.100.147:18002/infer",
+    json=payload,
+    timeout=300,
+)
+resp.raise_for_status()
+result = resp.json()
+print(result["num_detections"], result["detections"])
+```
+
+若需要在服务端落盘，可额外指定服务端路径：
+
+```python
+payload["output_dir"] = "/home/ubuntu/stephen/01-code/sam3/outputs_remote"
+payload["save_vis"] = True
+```
+
+### 3. 健康检查
+
+```bash
+curl http://192.168.100.147:18002/health
+```
+
+---
+
+## 落盘文件
+
+当指定 `output_dir` 时，服务端会写入：
+
+```
+{output_dir}/
+└── sam6d_results/
+    ├── detection_ism.json   # 检测结果 JSON
+    └── vis_ism.png          # 可视化图（save_vis=true 时）
+```
+
+未指定 `output_dir` 时，文件写入临时目录，请求结束后自动清理；检测结果仍通过 HTTP 响应的 `detections` 字段返回。
+
+---
+
+## 注意事项
+
+1. **跨机器调用**：必须使用 `image_base64`，`image_path` 必须是服务端本机路径。
+2. **output_dir**：必须是服务端本机可写路径；传客户端路径无效。
+3. **请求体大小**：Base64 会比原图大约 33%。大图可通过 `--max-request-mb` 调大限制。
+4. **并发**：推理串行执行（全局锁），同一时刻只处理一个 `/infer` 请求。
+5. **首次推理**：第一次调用 `/infer` 会加载模型，耗时明显高于后续请求。
