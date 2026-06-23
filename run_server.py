@@ -22,6 +22,8 @@ Or send a base64 image instead of ``image_path``:
 {
   "image_base64": "<base64 or data URL>",
   "prompt": "white plate",
+  "points": [[348, 236]],
+  "point_labels": [1],
   "return_vis_base64": true
 }
 """
@@ -157,6 +159,33 @@ def _load_request_image(payload: Dict[str, Any], stack: contextlib.ExitStack) ->
     return temp_image_path
 
 
+def _coerce_points(value: Any) -> List[List[float]]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not value:
+        raise ValueError("points must be a non-empty list of [x, y] pairs")
+    normalized: List[List[float]] = []
+    for item in value:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise ValueError("each point must be [x, y]")
+        normalized.append([float(item[0]), float(item[1])])
+    return normalized
+
+
+def _coerce_point_labels(value: Any, num_points: int) -> List[int]:
+    if value is None:
+        return [1] * num_points
+    if not isinstance(value, list) or len(value) != num_points:
+        raise ValueError("point_labels must be a list with the same length as points")
+    labels: List[int] = []
+    for item in value:
+        label = int(item)
+        if label not in (0, 1):
+            raise ValueError("point_labels must contain only 0 (negative) or 1 (positive)")
+        labels.append(label)
+    return labels
+
+
 def _load_request_output_dir(
     payload: Dict[str, Any], stack: contextlib.ExitStack
 ) -> tuple[Path, bool]:
@@ -231,6 +260,8 @@ def _run_inference(payload: Dict[str, Any], server_defaults: Dict[str, Any]) -> 
         field_name="save_vis",
         default=server_defaults["save_vis"],
     ) or return_vis_base64
+    points = _coerce_points(payload.get("points"))
+    point_labels = _coerce_point_labels(payload.get("point_labels"), len(points)) if points else None
 
     with contextlib.ExitStack() as stack:
         image_path = _load_request_image(payload, stack)
@@ -250,6 +281,8 @@ def _run_inference(payload: Dict[str, Any], server_defaults: Dict[str, Any]) -> 
                 fill_hole_area=fill_hole_area,
                 sprinkle_area=sprinkle_area,
                 postprocess=postprocess,
+                points=points or None,
+                point_labels=point_labels,
             )
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
@@ -259,6 +292,8 @@ def _run_inference(payload: Dict[str, Any], server_defaults: Dict[str, Any]) -> 
         response: Dict[str, Any] = {
             "ok": True,
             "prompt": prompt,
+            "points": points or None,
+            "point_labels": point_labels,
             "num_detections": len(detections),
             "detections": detections,
             "elapsed_ms": round(elapsed_ms, 3),

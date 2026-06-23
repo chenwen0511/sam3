@@ -16,7 +16,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -32,7 +32,7 @@ DEFAULT_CHECKPOINT_DIR = os.environ.get(
     "SAM3_CHECKPOINT_DIR", "/home/ubuntu/stephen/02-weight/sam3"
 )
 DEFAULT_CHECKPOINT = os.path.join(DEFAULT_CHECKPOINT_DIR, "sam3.pt")
-INFER_SCRIPT_VERSION = "4"
+INFER_SCRIPT_VERSION = "5"
 
 _MODEL_CACHE: Dict[str, Sam3Processor] = {}
 
@@ -216,6 +216,21 @@ def _load_processor(checkpoint_path: str, device: str, threshold: float) -> Sam3
     return _MODEL_CACHE[cache_key]
 
 
+def _normalize_points(
+    points: List[List[float]], image_width: int, image_height: int
+) -> Tuple[List[List[float]], List[int]]:
+    normalized: List[List[float]] = []
+    for point in points:
+        if len(point) != 2:
+            raise ValueError(f"each point must be [x, y], got {point!r}")
+        x, y = float(point[0]), float(point[1])
+        if 0.0 <= x <= 1.0 and 0.0 <= y <= 1.0:
+            normalized.append([x, y])
+        else:
+            normalized.append([x / image_width, y / image_height])
+    return normalized
+
+
 def run_sam3_segmentation(
     checkpoint_path: Path,
     rgb_path: Path,
@@ -228,7 +243,8 @@ def run_sam3_segmentation(
     fill_hole_area: int = 16,
     sprinkle_area: int = 16,
     postprocess: bool = True,
-
+    points: Optional[List[List[float]]] = None,
+    point_labels: Optional[List[int]] = None,
 ) -> Path:
     """Run SAM3 text-prompt segmentation; writes all instances above threshold."""
     t0 = time.perf_counter()
@@ -247,18 +263,27 @@ def run_sam3_segmentation(
         else torch.autocast(device_type="cpu", enabled=False)
     )
 
+    image_width, image_height = image.size
+    normalized_points = None
+    if points:
+        normalized_points = _normalize_points(points, image_width, image_height)
+        if point_labels is None:
+            point_labels = [1] * len(normalized_points)
+        if len(point_labels) != len(normalized_points):
+            raise ValueError("points and point_labels must have the same length")
+
     t_pred0 = time.perf_counter()
     with autocast_ctx:
-        import numpy as np
-        print("-------pointing----------")
         state = processor.set_image(image)
-        #W, H = image.size
-        #xywh = [312, 143, 38, 211]
-        #norm_xywh = [xywh[0] / W, xywh[1] / H, xywh[2] / W, xywh[3] / H]
-        #box = norm_cxcy + [0.01, 0.01]
-        #output = processor.add_geometric_prompt(state=state, box=norm_xywh, label=True)
-        cxcy = [348, 236]
-        output = processor.set_text_prompt(state=state, prompt=prompt)
+        if normalized_points:
+            output = processor.set_text_prompt_with_points(
+                prompt=prompt,
+                state=state,
+                points=normalized_points,
+                point_labels=point_labels,
+            )
+        else:
+            output = processor.set_text_prompt(state=state, prompt=prompt)
     t_pred1 = time.perf_counter()
     print(f"[sam3_seg_backend] predict elapsed_ms={(t_pred1 - t_pred0) * 1000:.3f}")
     print(f"[sam3_seg_backend] load+predict elapsed_ms={(t_pred1 - t0) * 1000:.3f}")
@@ -287,13 +312,9 @@ def run_sam3_segmentation(
             mask = (logit > mask_threshold).cpu().numpy().astype(bool)
         if not mask.any():
             continue
-        print(f"mask shape: {mask.shape}")
-        if mask[cxcy[1], cxcy[0]]:
-            print(f"pointed mask[{i}]....")
-            raw_masks.append(mask)
-            raw_scores.append(score)
-            raw_boxes.append(_bbox_from_mask(mask))
-            break
+        raw_masks.append(mask)
+        raw_scores.append(score)
+        raw_boxes.append(_bbox_from_mask(mask))
 
     n_before = len(raw_masks)
     if postprocess and n_before > 1:

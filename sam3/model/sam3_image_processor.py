@@ -1,7 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates. All Rights Reserved
 
 # pyre-unsafe
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import PIL
@@ -148,6 +148,64 @@ class Sam3Processor:
         boxes = torch.tensor(box, device=self.device, dtype=torch.float32).view(1, 1, 4)
         labels = torch.tensor([label], device=self.device, dtype=torch.bool).view(1, 1)
         state["geometric_prompt"].append_boxes(boxes, labels)
+
+        return self._forward_grounding(state)
+
+    @torch.inference_mode()
+    def add_point_prompt(self, point: List, label: bool, state: Dict):
+        """Adds a point prompt and run the inference.
+
+        The point is assumed to be in [x, y] format, normalized in [0, 1].
+        The label is True for a positive point, False for a negative point.
+        """
+        if "backbone_out" not in state:
+            raise ValueError("You must call set_image before add_point_prompt")
+
+        if "language_features" not in state["backbone_out"]:
+            dummy_text_outputs = self.model.backbone.forward_text(
+                ["visual"], device=self.device
+            )
+            state["backbone_out"].update(dummy_text_outputs)
+
+        if "geometric_prompt" not in state:
+            state["geometric_prompt"] = self.model._get_dummy_prompt()
+
+        points = torch.tensor(point, device=self.device, dtype=torch.float32).view(1, 1, 2)
+        labels = torch.tensor([int(label)], device=self.device, dtype=torch.long).view(1, 1)
+        state["geometric_prompt"].append_points(points, labels)
+
+        return self._forward_grounding(state)
+
+    @torch.inference_mode()
+    def set_text_prompt_with_points(
+        self,
+        prompt: str,
+        state: Dict,
+        points: Optional[List[List[float]]] = None,
+        point_labels: Optional[List[int]] = None,
+    ):
+        """Set a text prompt and optional normalized point prompts, then run inference."""
+        if "backbone_out" not in state:
+            raise ValueError("You must call set_image before set_text_prompt_with_points")
+
+        text_outputs = self.model.backbone.forward_text([prompt], device=self.device)
+        state["backbone_out"].update(text_outputs)
+        state["geometric_prompt"] = self.model._get_dummy_prompt()
+
+        if points:
+            if point_labels is None:
+                point_labels = [1] * len(points)
+            if len(points) != len(point_labels):
+                raise ValueError("points and point_labels must have the same length")
+
+            n = len(points)
+            pts = torch.tensor(points, device=self.device, dtype=torch.float32).view(n, 1, 2)
+            labels = torch.tensor(
+                [int(label) for label in point_labels],
+                device=self.device,
+                dtype=torch.long,
+            ).view(n, 1)
+            state["geometric_prompt"].append_points(pts, labels)
 
         return self._forward_grounding(state)
 
