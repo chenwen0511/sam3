@@ -186,6 +186,29 @@ curl -X POST http://127.0.0.1:18002/infer \
   }'
 ```
 
+## Multi-box JSON inference
+
+`sam3_box_tools/infer_box_json.py` runs positive geometric box prompts from a
+compact multi-box JSON document (schema `1.0`, `box_format: xyxy`). For each
+positive box it calls SAM3, keeps the candidate with highest IoU to the input
+box (gated by `--min-box-iou`), and writes per-box mask / overlay plus
+`result.json`.
+
+```bash
+conda run -n sam3 python sam3_box_tools/infer_box_json.py \
+  --image /path/to/image.png \
+  --boxes /path/to/boxes.json \
+  --checkpoint /path/to/sam3.pt \
+  --output-dir /path/to/output \
+  --threshold 0.5 \
+  --min-box-iou 0.10
+```
+
+Box JSON fields: `schema_version`, `image_width`, `image_height`, `box_format`,
+and `boxes[]` with `id`, `label`, `bbox` (`[x1,y1,x2,y2]`), optional
+`positive` (default `true`). Image size in JSON must match the input image.
+Requires CUDA.
+
 ## Examples
 
 The `examples` directory contains notebooks demonstrating how to use SAM3 with
