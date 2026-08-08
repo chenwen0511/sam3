@@ -422,7 +422,8 @@ class Sam3RequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: Any) -> None:
         print(
             "[sam3_http] "
-            f"{self.address_string()} - {self.log_date_time_string()} - {format % args}"
+            f"{self.address_string()} - {self.log_date_time_string()} - {format % args}",
+            flush=True,
         )
 
 
@@ -515,12 +516,13 @@ def main() -> None:
     print(
         "[sam3_http] serving on "
         f"http://{args.host}:{args.port} "
-        f"(infer module path: {INFER_MODULE_PATH})"
+        f"(infer module path: {INFER_MODULE_PATH})",
+        flush=True,
     )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\n[sam3_http] shutting down")
+        print("\n[sam3_http] shutting down", flush=True)
     finally:
         server.server_close()
 

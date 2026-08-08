@@ -72,8 +72,9 @@ cmd_start() {
   rm -f "${PID_FILE}"
   _activate_env
 
-  # shellcheck disable=SC2086
-  nohup python run_server.py --host "${HOST}" --port "${PORT}" "$@" \
+  # Unbuffered stdout/stderr so nohup log shows lines immediately.
+  export PYTHONUNBUFFERED=1
+  nohup python -u run_server.py --host "${HOST}" --port "${PORT}" "$@" \
     >>"${LOG_FILE}" 2>&1 &
   local pid=$!
   echo "${pid}" >"${PID_FILE}"
