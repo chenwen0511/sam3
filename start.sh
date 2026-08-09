@@ -16,6 +16,7 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "${REPO_ROOT}"
 
+export SAM3_CHECKPOINT_DIR=/home/kim/weights/sam3
 CONDA_ENV="${SAM3_CONDA_ENV:-sam3}"
 CONDA_BASE="${CONDA_BASE:-/home/ubuntu/miniconda3}"
 PID_FILE="${SAM3_PID_FILE:-${REPO_ROOT}/.run/run_server.pid}"
